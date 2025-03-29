@@ -10,7 +10,7 @@ const authRoutes = require("./routes/auth");
 const messageRoutes = require("./routes/messages");
 const mediaRoutes = require("./routes/media");
 const Message = require("./models/Message");
-
+const contactRoutes = require("./routes/contacts");
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -32,7 +32,7 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads"))); // Serve u
 app.use("/auth", authRoutes);
 app.use("/messages", messageRoutes);
 app.use("/media", mediaRoutes);
-
+app.use("/contacts", contactRoutes);
 // ✅ Handle Socket.IO connections
 io.on("connection", (socket) => {
   console.log("🔌 New user connected:", socket.id);
