@@ -8,12 +8,13 @@ const { generateKeyPairSync } = require("crypto");
 // Register route
 router.post("/register", async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password, email } = req.body;
 
     // Check if user already exists
-    const existingUser = await User.findOne({ username });
+    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+
     if (existingUser) {
-      return res.status(400).json({ error: "Username already taken" });
+      return res.status(400).json({ error: "Username or Email already taken" });
     }
 
     // Hash password
@@ -28,6 +29,7 @@ router.post("/register", async (req, res) => {
     const user = new User({
       username,
       password: hashedPassword,
+      email: email,
       publicKey: publicKey.export({ type: "spki", format: "pem" }),
       privateKey: privateKey.export({ type: "pkcs8", format: "pem" }), // Store securely
     });
@@ -51,9 +53,13 @@ router.post("/login", async (req, res) => {
     }
 
     // Generate JWT token
-    const token = jwt.sign({ id: user._id }, "your-secret-key", {
-      expiresIn: "1h",
-    });
+    const token = jwt.sign(
+      { id: user._id },
+      "48c2d6be0cc9336269ead671a308fab990769445c1026ccdce6506f5bdb1ef5b",
+      {
+        expiresIn: "1h",
+      }
+    );
 
     res.json({ token, publicKey: user.publicKey });
   } catch (error) {
