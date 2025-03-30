@@ -39,6 +39,7 @@ app.use("/media", mediaRoutes);
 app.use("/contacts", contactRoutes);
 app.use("/users", userRoutes);
 app.use("/friends", friendRoutes);
+app.use("/auth", authRoutes);
 
 // ✅ Handle Socket.IO connections
 io.on("connection", (socket) => {

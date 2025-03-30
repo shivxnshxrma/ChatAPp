@@ -11,6 +11,7 @@ router.get("/", authMiddleware, async (req, res) => {
       "contacts",
       "username"
     );
+    // console.log(user.contacts);
     res.json(user.contacts);
   } catch (error) {
     console.error("❌ Error fetching contacts:", error);

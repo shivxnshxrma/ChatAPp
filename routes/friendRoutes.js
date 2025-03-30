@@ -67,7 +67,7 @@ router.get("/requests", authenticateToken, async (req, res) => {
 router.post("/accept", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { senderId } = req.body; // Fixed variable name
+    const { senderId } = req.body;
 
     if (!senderId) {
       return res.status(400).json({ error: "Sender ID is required" });
@@ -84,21 +84,19 @@ router.post("/accept", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // ✅ Remove from friendRequests
-    user.friendRequests = user.friendRequests.filter(
-      (id) => id.toString() !== senderId
+    // ✅ Use `updateOne` instead of modifying the document and calling `.save()`
+    await User.updateOne(
+      { _id: userId },
+      {
+        $pull: { friendRequests: senderId }, // ✅ Remove from friendRequests
+        $addToSet: { contacts: senderId }, // ✅ Add to contacts (avoiding duplicates)
+      }
     );
 
-    // ✅ Add to contacts
-    if (!user.contacts.includes(senderId)) {
-      user.contacts.push(new mongoose.Types.ObjectId(senderId));
-    }
-    if (!sender.contacts.includes(userId)) {
-      sender.contacts.push(new mongoose.Types.ObjectId(userId));
-    }
-
-    await user.save(); // ✅ Fixed bug (uncommented this line)
-    await sender.save();
+    await User.updateOne(
+      { _id: senderId },
+      { $addToSet: { contacts: userId } } // ✅ Add to sender’s contacts
+    );
 
     res.json({ message: "Friend request accepted!" });
   } catch (error) {
