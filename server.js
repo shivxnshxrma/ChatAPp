@@ -11,6 +11,8 @@ const messageRoutes = require("./routes/messages");
 const mediaRoutes = require("./routes/media");
 const Message = require("./models/Message");
 const contactRoutes = require("./routes/contacts");
+const userRoutes = require("./routes/userRoutes");
+const friendRoutes = require("./routes/friendRoutes");
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
@@ -33,6 +35,8 @@ app.use("/auth", authRoutes);
 app.use("/messages", messageRoutes);
 app.use("/media", mediaRoutes);
 app.use("/contacts", contactRoutes);
+app.use("/users", userRoutes);
+app.use("/friends", friendRoutes);
 // ✅ Handle Socket.IO connections
 io.on("connection", (socket) => {
   console.log("🔌 New user connected:", socket.id);
