@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 
 module.exports = (req, res, next) => {
   const authHeader = req.header("Authorization");
-  console.log("🔍 Received Authorization Header:", authHeader);
+  // console.log("🔍 Received Authorization Header:", authHeader);
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     console.error("❌ No token provided or incorrect format");
@@ -10,11 +10,11 @@ module.exports = (req, res, next) => {
   }
 
   const token = authHeader.replace("Bearer ", "");
-  console.log("✅ Extracted Token:", token);
+  // console.log("✅ Extracted Token:", token);
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("✅ Decoded Token:", decoded);
+    // console.log("✅ Decoded Token:", decoded);
 
     req.user = decoded; // Attach decoded user data to `req.user`
     next();

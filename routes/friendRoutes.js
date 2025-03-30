@@ -1,5 +1,6 @@
 const express = require("express");
 const User = require("../models/User");
+const mongoose = require("mongoose");
 const authenticateToken = require("../middleware/auth");
 
 const router = express.Router();
@@ -10,20 +11,23 @@ router.post("/request", authenticateToken, async (req, res) => {
     const senderId = req.user.id;
     const { receiverId } = req.body;
 
-    if (!receiverId) {
+    if (!receiverId)
       return res.status(400).json({ error: "Receiver ID is required" });
+
+    if (!mongoose.Types.ObjectId.isValid(receiverId)) {
+      return res.status(400).json({ error: "Invalid Receiver ID" });
     }
 
     const sender = await User.findById(senderId);
     const receiver = await User.findById(receiverId);
 
     if (!receiver) return res.status(404).json({ error: "User not found" });
+
     if (receiver.friendRequests.includes(senderId)) {
       return res.status(400).json({ error: "Friend request already sent" });
     }
 
-    // Add sender to receiver's friendRequests
-    receiver.friendRequests.push(senderId);
+    receiver.friendRequests.push(new mongoose.Types.ObjectId(senderId));
     await receiver.save();
 
     res.json({ message: "Friend request sent!" });
@@ -38,7 +42,6 @@ router.get("/requests", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Find the user and populate friendRequests with username and id
     const user = await User.findById(userId).populate(
       "friendRequests",
       "username"
@@ -48,7 +51,6 @@ router.get("/requests", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Format the response to match frontend expectations
     const friendRequests = user.friendRequests.map((request) => ({
       id: request._id.toString(),
       username: request.username,
@@ -65,34 +67,38 @@ router.get("/requests", authenticateToken, async (req, res) => {
 router.post("/accept", authenticateToken, async (req, res) => {
   try {
     const userId = req.user.id;
-    const { requestId } = req.body;
+    const { senderId } = req.body; // Fixed variable name
 
-    if (!requestId) {
-      return res.status(400).json({ error: "Request ID is required" });
+    if (!senderId) {
+      return res.status(400).json({ error: "Sender ID is required" });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(senderId)) {
+      return res.status(400).json({ error: "Invalid Sender ID" });
     }
 
     const user = await User.findById(userId);
-    const friend = await User.findById(requestId);
+    const sender = await User.findById(senderId);
 
-    if (!user || !friend) {
+    if (!user || !sender) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Remove from friendRequests
+    // ✅ Remove from friendRequests
     user.friendRequests = user.friendRequests.filter(
-      (id) => id.toString() !== requestId
+      (id) => id.toString() !== senderId
     );
 
-    // Add to contacts if not already added
-    if (!user.contacts.includes(requestId)) {
-      user.contacts.push(requestId);
+    // ✅ Add to contacts
+    if (!user.contacts.includes(senderId)) {
+      user.contacts.push(new mongoose.Types.ObjectId(senderId));
     }
-    if (!friend.contacts.includes(userId)) {
-      friend.contacts.push(userId);
+    if (!sender.contacts.includes(userId)) {
+      sender.contacts.push(new mongoose.Types.ObjectId(userId));
     }
 
-    await user.save();
-    await friend.save();
+    await user.save(); // ✅ Fixed bug (uncommented this line)
+    await sender.save();
 
     res.json({ message: "Friend request accepted!" });
   } catch (error) {
