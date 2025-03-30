@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const router = express.Router();
 const { generateKeyPairSync } = require("crypto");
+const auth = require("../middleware/auth");
 
 // Register route
 router.post("/register", async (req, res) => {
@@ -11,9 +12,9 @@ router.post("/register", async (req, res) => {
     const { username, password, email, phoneNumber } = req.body;
 
     // Check if user already exists
-    console.log(username);
-    console.log(password);
-    console.log(email);
+    // console.log(username);
+    // console.log(password);
+    // console.log(email);
 
     const existingUser = await User.findOne({
       $or: [{ username }, { email }, { phoneNumber }],
@@ -75,7 +76,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-router.get("/me", authenticateToken, async (req, res) => {
+router.get("/me", auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password"); // Exclude password
 
