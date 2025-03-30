@@ -8,10 +8,16 @@ const { generateKeyPairSync } = require("crypto");
 // Register route
 router.post("/register", async (req, res) => {
   try {
-    const { username, password, email } = req.body;
+    const { username, password, email, phoneNumber } = req.body;
 
     // Check if user already exists
-    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    console.log(username);
+    console.log(password);
+    console.log(email);
+
+    const existingUser = await User.findOne({
+      $or: [{ username }, { email }, { phoneNumber }],
+    });
 
     if (existingUser) {
       return res.status(400).json({ error: "Username or Email already taken" });
@@ -30,6 +36,7 @@ router.post("/register", async (req, res) => {
       username,
       password: hashedPassword,
       email: email,
+      phoneNumber: phoneNumber,
       publicKey: publicKey.export({ type: "spki", format: "pem" }),
       privateKey: privateKey.export({ type: "pkcs8", format: "pem" }), // Store securely
     });
