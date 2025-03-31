@@ -12,6 +12,32 @@ router.get("/debug", (req, res) => {
   });
 });
 
+// Debug endpoint to check contacts without populating - doesn't require auth
+router.get("/debug/raw", authMiddleware, async (req, res) => {
+  try {
+    // Find the user without populating contacts
+    const user = await User.findById(req.user.id)
+      .select("username email contacts");
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+    
+    // Return raw contacts data for debugging
+    return res.json({
+      userId: user._id,
+      username: user.username,
+      contactIds: user.contacts,
+      contactCount: user.contacts ? user.contacts.length : 0,
+      message: "Raw contacts debug info",
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Error in contacts debug endpoint:", error);
+    return res.status(500).json({ error: "Failed to get contacts debug info" });
+  }
+});
+
 // Get friend requests - this needs to come BEFORE the /:contactId route
 router.get("/requests", authMiddleware, async (req, res) => {
   try {
@@ -38,6 +64,8 @@ router.get("/requests", authMiddleware, async (req, res) => {
 // Get all contacts with pagination
 router.get("/", authMiddleware, async (req, res) => {
   try {
+    console.log("Fetching contacts for user ID:", req.user.id);
+    
     // Pagination parameters
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -49,7 +77,7 @@ router.get("/", authMiddleware, async (req, res) => {
       .select("-password -privateKey -publicKey")
       .populate({
         path: "contacts",
-        select: "username email phoneNumber",
+        select: "username email phoneNumber _id",
         match: search ? { 
           $or: [
             { username: { $regex: search, $options: "i" } },
@@ -61,25 +89,51 @@ router.get("/", authMiddleware, async (req, res) => {
     
     // If no user found
     if (!user) {
+      console.log("User not found for contacts retrieval");
       return res.status(404).json({ error: "User not found" });
     }
     
+    console.log(`Found user with ${user.contacts ? user.contacts.length : 0} contacts`);
+    
+    // Check if contacts is defined and is an array
+    if (!user.contacts || !Array.isArray(user.contacts)) {
+      console.log("Contacts missing or not an array");
+      return res.json([]);
+    }
+    
+    // Add online status and unread count to each contact
+    const contactsWithStatus = user.contacts.map(contact => {
+      // Only do this if contact is a full document (not just an ID)
+      if (contact._id) {
+        return {
+          ...contact.toObject(),
+          unreadCount: 0, // This would be calculated from messages
+          isOnline: false, // This would come from socket connections
+          lastSeen: new Date().toISOString() // Placeholder
+        };
+      } else {
+        // If we only have the ID, return a minimal object
+        return {
+          _id: contact,
+          username: "Unknown",
+          email: "",
+          unreadCount: 0,
+          isOnline: false,
+          lastSeen: new Date().toISOString()
+        };
+      }
+    });
+    
     // Apply pagination manually after populate
-    const totalContacts = user.contacts.length;
-    const paginatedContacts = user.contacts.slice(skip, skip + limit);
+    const totalContacts = contactsWithStatus.length;
+    const paginatedContacts = contactsWithStatus.slice(skip, skip + limit);
     
     const totalPages = Math.ceil(totalContacts / limit);
     
-    res.json({
-      contacts: paginatedContacts,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalContacts,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
-      },
-    });
+    console.log(`Returning ${paginatedContacts.length} contacts`);
+    
+    // Simply return the array of contacts
+    return res.json(paginatedContacts);
   } catch (error) {
     console.error("Error fetching contacts:", error);
     res.status(500).json({ error: "Failed to fetch contacts" });
@@ -250,13 +304,7 @@ router.get("/:contactId", authMiddleware, async (req, res) => {
       });
     }
     
-    // Get the current user 
-    const user = await User.findById(req.user.id);
-    if (!user) {
-      console.log(`User not found: ${req.user.id}`);
-      return res.status(404).json({ error: "User not found" });
-    }
-    
+    // Look up the user directly by ID - don't require them to be in contacts
     try {
       // Get the contact details
       const contact = await User.findById(contactId)
