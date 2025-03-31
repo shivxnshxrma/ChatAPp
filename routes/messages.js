@@ -30,6 +30,14 @@ router.get("/test/ping", (req, res) => {
   res.status(200).json({ message: "Messages API is working!" });
 });
 
+// Added simple test endpoint that doesn't require authentication
+router.get("/debug", (req, res) => {
+  res.status(200).json({ 
+    message: "Messages debug endpoint working", 
+    time: new Date().toISOString() 
+  });
+});
+
 // 📩 **Send Message (Text or Media)**
 router.post(
   "/send",
@@ -87,6 +95,21 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
     
     console.log(`Fetching messages between ${userId} and ${otherUserId}`);
     
+    // Check if both user IDs are valid
+    if (!userId || !otherUserId) {
+      console.log('Invalid user IDs provided');
+      return res.json({
+        messages: [],
+        pagination: {
+          currentPage: 1,
+          totalPages: 0,
+          totalMessages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      });
+    }
+    
     // Pagination parameters
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -129,7 +152,18 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching messages:", error);
-    res.status(500).json({ error: "Failed to fetch messages", details: error.message });
+    // Return empty messages array instead of error to prevent app crashes
+    res.json({
+      messages: [],
+      pagination: {
+        currentPage: 1,
+        totalPages: 0,
+        totalMessages: 0,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+      error: error.message
+    });
   }
 });
 
