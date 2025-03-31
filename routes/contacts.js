@@ -12,6 +12,29 @@ router.get("/debug", (req, res) => {
   });
 });
 
+// Get friend requests - this needs to come BEFORE the /:contactId route
+router.get("/requests", authMiddleware, async (req, res) => {
+  try {
+    console.log("Fetching friend requests");
+    const user = await User.findById(req.user.id)
+      .populate({
+        path: "friendRequests", 
+        select: "username email"
+      });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    return res.json({
+      friendRequests: user.friendRequests || [],
+    });
+  } catch (error) {
+    console.error("Error fetching friend requests:", error);
+    return res.status(500).json({ error: "Failed to fetch friend requests" });
+  }
+});
+
 // Get all contacts with pagination
 router.get("/", authMiddleware, async (req, res) => {
   try {
@@ -136,32 +159,76 @@ router.get("/search", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ Add a new contact by username
-router.post("/add", authMiddleware, async (req, res) => {
-  const { username } = req.body;
-
+// Custom endpoint for sending friend requests
+router.post("/request", authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const contact = await User.findOne({ username });
-    if (!contact) return res.status(404).json({ error: "Contact not found" });
-
-    if (user.contacts.includes(contact._id)) {
-      return res.status(400).json({ error: "Contact already exists" });
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: "User ID is required" });
     }
 
-    user.contacts.push(contact._id);
-    await user.save();
+    const currentUser = await User.findById(req.user.id);
+    const targetUser = await User.findById(userId);
 
-    res.json({ message: "Contact added successfully!", contact });
+    if (!currentUser || !targetUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if request already sent
+    if (targetUser.friendRequests.includes(currentUser._id)) {
+      return res.status(400).json({ error: "Friend request already sent" });
+    }
+
+    // Check if already friends
+    if (currentUser.contacts.includes(targetUser._id)) {
+      return res.status(400).json({ error: "Users are already friends" });
+    }
+
+    targetUser.friendRequests.push(currentUser._id);
+    await targetUser.save();
+
+    res.json({ message: "Friend request sent" });
   } catch (error) {
-    console.error("❌ Error adding contact:", error);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Error sending friend request:", error);
+    res.status(500).json({ error: "Failed to send friend request" });
   }
 });
 
-// Get a single contact by ID
+// Accept friend request
+router.post("/request/:requestId/accept", authMiddleware, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const currentUser = await User.findById(req.user.id);
+    const requestingUser = await User.findById(requestId);
+
+    if (!currentUser || !requestingUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if request exists
+    if (!currentUser.friendRequests.includes(requestId)) {
+      return res.status(400).json({ error: "Friend request not found" });
+    }
+
+    // Add to contacts
+    currentUser.contacts.push(requestId);
+    requestingUser.contacts.push(currentUser._id);
+
+    // Remove from requests
+    currentUser.friendRequests = currentUser.friendRequests.filter(
+      id => id.toString() !== requestId
+    );
+
+    await Promise.all([currentUser.save(), requestingUser.save()]);
+
+    res.json({ message: "Friend request accepted" });
+  } catch (error) {
+    console.error("Error accepting friend request:", error);
+    res.status(500).json({ error: "Failed to accept friend request" });
+  }
+});
+
+// Get a single contact by ID - this should be LAST since it uses a dynamic parameter
 router.get("/:contactId", authMiddleware, async (req, res) => {
   try {
     const contactId = req.params.contactId;

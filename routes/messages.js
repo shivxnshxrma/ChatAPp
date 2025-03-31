@@ -25,17 +25,32 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max size
 });
 
-// Test endpoint to verify the route is working
+// All test/debug endpoints must come first
 router.get("/test/ping", (req, res) => {
   res.status(200).json({ message: "Messages API is working!" });
 });
 
-// Added simple test endpoint that doesn't require authentication
 router.get("/debug", (req, res) => {
   res.status(200).json({ 
     message: "Messages debug endpoint working", 
     time: new Date().toISOString() 
   });
+});
+
+// Added test endpoint to check messages for a specific user
+router.get("/user/debug", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    res.json({
+      userId,
+      message: "Messages user debug endpoint working",
+      time: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Error in user debug endpoint:", error);
+    res.status(500).json({ error: "Error in user debug endpoint" });
+  }
 });
 
 // 📩 **Send Message (Text or Media)**
