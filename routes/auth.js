@@ -5,23 +5,40 @@ const User = require("../models/User");
 const router = express.Router();
 const { generateKeyPairSync } = require("crypto");
 const auth = require("../middleware/auth");
+const { registerValidation, loginValidation } = require("../middleware/validation");
+const { authLimiter, createAccountLimiter } = require("../middleware/rateLimiter");
+const { v4: uuidv4 } = require('uuid');
+
+// Store refresh tokens (in a real app, these should be in the database)
+// This is just for demonstration purposes
+const refreshTokens = new Map();
 
 // Register route
-router.post("/register", async (req, res) => {
+router.post("/register", createAccountLimiter, registerValidation, async (req, res) => {
   try {
     const { username, password, email, phoneNumber } = req.body;
 
     // Check if user already exists
-    // console.log(username);
-    // console.log(password);
-    // console.log(email);
-
-    const existingUser = await User.findOne({
-      $or: [{ username }, { email }, { phoneNumber }],
+    const existingUser = await User.findOne({ 
+      $or: [
+        { username },
+        { email },
+        { phoneNumber }
+      ]
     });
 
     if (existingUser) {
-      return res.status(400).json({ error: "Username or Email already taken" });
+      return res.status(400).json({ 
+        error: "Registration failed",
+        message: existingUser.username === username ? "Username already taken" : 
+                 existingUser.email === email ? "Email already in use" : 
+                 "Phone number already in use"
+      });
+    }
+
+    // Validate password strength
+    if (password.length < 8) {
+      return res.status(400).json({ error: "Password must be at least 8 characters long" });
     }
 
     // Hash password
@@ -32,18 +49,34 @@ router.post("/register", async (req, res) => {
       modulusLength: 2048,
     });
 
-    // Store keys securely
+    // Export public key for database storage
+    const publicKeyString = publicKey.export({ type: "spki", format: "pem" });
+    
+    // Generate a unique identifier for the key
+    const keyId = require('crypto').randomUUID();
+    
+    // In a production app, store privateKey securely in a vault service
+    // For now, we'll return it to the client for client-side storage
+    const privateKeyString = privateKey.export({ type: "pkcs8", format: "pem" });
+
+    // Create new user with public key only
     const user = new User({
       username,
       password: hashedPassword,
-      email: email,
-      phoneNumber: phoneNumber,
-      publicKey: publicKey.export({ type: "spki", format: "pem" }),
-      privateKey: privateKey.export({ type: "pkcs8", format: "pem" }), // Store securely
+      email,
+      phoneNumber,
+      publicKey: publicKeyString,
+      keyIdentifier: keyId,
     });
 
     await user.save();
-    res.status(201).json({ message: "User registered successfully" });
+    
+    // Return private key to client for secure storage
+    res.status(201).json({ 
+      message: "User registered successfully", 
+      keyId,
+      privateKey: privateKeyString // In production, this should be handled more securely
+    });
   } catch (error) {
     console.error("Registration error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -51,7 +84,7 @@ router.post("/register", async (req, res) => {
 });
 
 // Login route
-router.post("/login", async (req, res) => {
+router.post("/login", authLimiter, loginValidation, async (req, res) => {
   try {
     const { username, password } = req.body;
     const user = await User.findOne({ username });
@@ -63,15 +96,103 @@ router.post("/login", async (req, res) => {
     // Generate JWT token
     const token = jwt.sign(
       { id: user._id },
-      "48c2d6be0cc9336269ead671a308fab990769445c1026ccdce6506f5bdb1ef5b",
+      process.env.JWT_SECRET,
       {
         expiresIn: "1h",
       }
     );
 
-    res.json({ token, publicKey: user.publicKey });
+    // Generate refresh token
+    const refreshToken = uuidv4();
+    
+    // Store refresh token with user ID (in a real app, save to database)
+    refreshTokens.set(refreshToken, {
+      userId: user._id.toString(),
+      createdAt: new Date()
+    });
+
+    res.json({ 
+      token, 
+      refreshToken,
+      publicKey: user.publicKey 
+    });
   } catch (error) {
     console.error("Login error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Refresh token endpoint
+router.post("/refresh-token", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(400).json({ error: "Refresh token is required" });
+    }
+    
+    // Check if refresh token exists
+    const tokenData = refreshTokens.get(refreshToken);
+    if (!tokenData) {
+      return res.status(401).json({ error: "Invalid refresh token" });
+    }
+    
+    // Check if refresh token is too old (more than 30 days)
+    const tokenAge = Date.now() - tokenData.createdAt;
+    if (tokenAge > 30 * 24 * 60 * 60 * 1000) { // 30 days in ms
+      refreshTokens.delete(refreshToken);
+      return res.status(401).json({ error: "Refresh token expired" });
+    }
+    
+    // Get user from database
+    const user = await User.findById(tokenData.userId);
+    if (!user) {
+      refreshTokens.delete(refreshToken);
+      return res.status(401).json({ error: "User not found" });
+    }
+    
+    // Generate new JWT token
+    const token = jwt.sign(
+      { id: user._id },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
+    
+    // Generate new refresh token
+    const newRefreshToken = uuidv4();
+    
+    // Delete old refresh token and store new one
+    refreshTokens.delete(refreshToken);
+    refreshTokens.set(newRefreshToken, {
+      userId: user._id.toString(),
+      createdAt: new Date()
+    });
+    
+    res.json({ 
+      token, 
+      refreshToken: newRefreshToken 
+    });
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Logout endpoint
+router.post("/logout", auth, async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    // Remove refresh token if provided
+    if (refreshToken) {
+      refreshTokens.delete(refreshToken);
+    }
+    
+    res.json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Logout error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

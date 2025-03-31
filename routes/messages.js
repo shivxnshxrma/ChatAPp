@@ -3,6 +3,8 @@ const multer = require("multer");
 const path = require("path");
 const Message = require("../models/Message");
 const authMiddleware = require("../middleware/auth");
+const { messageValidation } = require("../middleware/validation");
+const optimizeImage = require("../middleware/imageOptimization");
 
 const router = express.Router();
 
@@ -12,17 +14,24 @@ const storage = multer.diskStorage({
     cb(null, "uploads/"); // Save files in the uploads folder
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname)); // Unique file name
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, `${uniqueSuffix}${ext}`);
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max size
+});
 
 // 📩 **Send Message (Text or Media)**
 router.post(
   "/send",
   authMiddleware,
   upload.single("media"),
+  optimizeImage,
+  messageValidation,
   async (req, res) => {
     try {
       const { receiverId, content } = req.body;
@@ -30,11 +39,16 @@ router.post(
 
       let mediaUrl = null;
       let mediaType = null;
+      let thumbnailUrl = null;
 
       // ✅ If media is uploaded, set media URL and type
       if (req.file) {
         mediaUrl = `/uploads/${req.file.filename}`;
-        mediaType = req.file.mimetype.split("/")[0]; // Extract 'image', 'video', etc.
+        mediaType = req.file.mimetype;
+        
+        if (req.file.thumbnail) {
+          thumbnailUrl = req.file.thumbnail.url;
+        }
       }
 
       // ✅ Save message to database
@@ -44,9 +58,14 @@ router.post(
         content: content || "", // Allow empty content for media-only messages
         mediaUrl,
         mediaType,
+        thumbnailUrl,
       });
 
       await message.save();
+      
+      // Populate sender info
+      await message.populate("sender", "username");
+      
       res.status(201).json({ success: true, message });
     } catch (error) {
       console.error("Message send error:", error);
@@ -55,23 +74,53 @@ router.post(
   }
 );
 
-// 📩 **Get Messages Between Two Users**
+// 📩 **Get Messages Between Two Users with Pagination**
 router.get("/:otherUserId", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
     const otherUserId = req.params.otherUserId;
+    
+    // Pagination parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
 
+    // Get messages with pagination
     const messages = await Message.find({
       $or: [
         { sender: userId, receiver: otherUserId },
         { sender: otherUserId, receiver: userId },
       ],
-    }).sort({ timestamp: 1 }); // Sort messages by time (oldest first)
-
-    res.json(messages);
+    })
+      .sort({ createdAt: -1 }) // Sort by newest first for pagination
+      .skip(skip)
+      .limit(limit)
+      .populate("sender", "username")
+      .lean();
+    
+    // Get total count for pagination info
+    const totalMessages = await Message.countDocuments({
+      $or: [
+        { sender: userId, receiver: otherUserId },
+        { sender: otherUserId, receiver: userId },
+      ],
+    });
+    
+    const totalPages = Math.ceil(totalMessages / limit);
+    
+    res.json({
+      messages: messages.reverse(), // Reverse to show oldest first in the UI
+      pagination: {
+        currentPage: page,
+        totalPages,
+        totalMessages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
     console.error("Error fetching messages:", error);
-    res.status(500).send("Server error");
+    res.status(500).json({ error: "Failed to fetch messages" });
   }
 });
 

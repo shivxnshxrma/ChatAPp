@@ -5,6 +5,10 @@ const socketIo = require("socket.io");
 const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 const path = require("path");
+const cors = require("cors");
+const helmet = require("helmet");
+const compression = require("compression");
+const { apiLimiter } = require("./middleware/rateLimiter");
 
 const authRoutes = require("./routes/auth");
 const messageRoutes = require("./routes/messages");
@@ -13,33 +17,83 @@ const Message = require("./models/Message");
 const contactRoutes = require("./routes/contacts");
 const userRoutes = require("./routes/userRoutes");
 const friendRoutes = require("./routes/friendRoutes");
-const User = require("./models/User"); // Import User model
+const User = require("./models/User");
 
 const app = express();
 const server = http.createServer(app);
+
+// Environment variables
+const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || "development";
+const ORIGIN = process.env.ALLOWED_ORIGIN || "*";
+
+// Security headers with Helmet
+app.use(helmet());
+
+// Use compression for all responses
+app.use(compression());
+
+// CORS configuration
+app.use(cors({
+  origin: ORIGIN,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true
+}));
+
+// JSON parsing with size limit
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// Socket.IO setup with CORS
 const io = socketIo(server, {
   cors: {
-    origin: "*", // Allow frontend to connect
+    origin: ORIGIN,
     methods: ["GET", "POST"],
+    credentials: true
   },
 });
+
+// Rate limiting for API routes
+app.use("/api", apiLimiter);
+
+// Static files
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ✅ Connect to MongoDB
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Connected to MongoDB"))
-  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
+  .catch((err) => {
+    console.error("❌ MongoDB Connection Error:", err);
+    process.exit(1); // Exit process with failure
+  });
 
-// ✅ Middleware
-app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads"))); // Serve uploaded files
+// Routes
 app.use("/auth", authRoutes);
 app.use("/messages", messageRoutes);
 app.use("/media", mediaRoutes);
 app.use("/contacts", contactRoutes);
 app.use("/users", userRoutes);
 app.use("/friends", friendRoutes);
-app.use("/auth", authRoutes);
+
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "UP", environment: NODE_ENV });
+});
+
+// 404 handler
+app.use((req, res, next) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error("❌ Server error:", err);
+  const statusCode = err.statusCode || 500;
+  const message = NODE_ENV === "production" ? "Internal Server Error" : err.message;
+  res.status(statusCode).json({ error: message });
+});
 
 // ✅ Handle Socket.IO connections
 io.on("connection", (socket) => {
@@ -62,7 +116,7 @@ io.on("connection", (socket) => {
   // ✅ Handle sending messages (text + media)
   socket.on("sendMessage", async (data) => {
     try {
-      const { receiverId, content, mediaUrl, mediaType } = data;
+      const { receiverId, content, mediaUrl, mediaType, thumbnailUrl } = data;
       const senderId = socket.userId;
 
       // Save message to DB
@@ -72,19 +126,17 @@ io.on("connection", (socket) => {
         content,
         mediaUrl,
         mediaType,
+        thumbnailUrl
       });
 
       await message.save();
+      await message.populate("sender", "username");
 
       // Emit message to receiver's socket room
-      io.to(receiverId).emit("receiveMessage", {
-        senderId,
-        content,
-        mediaUrl,
-        mediaType,
-      });
+      io.to(receiverId).emit("receiveMessage", message);
     } catch (error) {
       console.error("❌ Error sending message:", error);
+      socket.emit("error", { message: "Failed to send message" });
     }
   });
 
@@ -108,6 +160,7 @@ io.on("connection", (socket) => {
       }
     } catch (error) {
       console.error("❌ Friend request error:", error);
+      socket.emit("error", { message: "Failed to send friend request" });
     }
   });
 
@@ -143,6 +196,7 @@ io.on("connection", (socket) => {
       io.to(userId).emit("friendRequestAccepted", { requestId });
     } catch (error) {
       console.error("❌ Accept friend request error:", error);
+      socket.emit("error", { message: "Failed to accept friend request" });
     }
   });
 
@@ -153,5 +207,22 @@ io.on("connection", (socket) => {
 });
 
 // ✅ Start server
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} in ${NODE_ENV} mode`));
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Promise Rejection:', err);
+  // Close server & exit process in production
+  if (NODE_ENV === 'production') {
+    server.close(() => process.exit(1));
+  }
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  // Close server & exit process in production
+  if (NODE_ENV === 'production') {
+    server.close(() => process.exit(1));
+  }
+});
