@@ -25,6 +25,11 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max size
 });
 
+// Test endpoint to verify the route is working
+router.get("/test/ping", (req, res) => {
+  res.status(200).json({ message: "Messages API is working!" });
+});
+
 // 📩 **Send Message (Text or Media)**
 router.post(
   "/send",
@@ -80,6 +85,8 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
     const userId = req.user.id;
     const otherUserId = req.params.otherUserId;
     
+    console.log(`Fetching messages between ${userId} and ${otherUserId}`);
+    
     // Pagination parameters
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -92,11 +99,13 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
         { sender: otherUserId, receiver: userId },
       ],
     })
-      .sort({ createdAt: -1 }) // Sort by newest first for pagination
+      .sort({ timestamp: -1 }) // Sort by newest first for pagination
       .skip(skip)
       .limit(limit)
       .populate("sender", "username")
       .lean();
+    
+    console.log(`Found ${messages.length} messages`);
     
     // Get total count for pagination info
     const totalMessages = await Message.countDocuments({
@@ -120,7 +129,7 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching messages:", error);
-    res.status(500).json({ error: "Failed to fetch messages" });
+    res.status(500).json({ error: "Failed to fetch messages", details: error.message });
   }
 });
 

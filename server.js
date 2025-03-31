@@ -77,6 +77,19 @@ app.use("/contacts", contactRoutes);
 app.use("/users", userRoutes);
 app.use("/friends", friendRoutes);
 
+// Add a test route at the root level
+app.get("/test", (req, res) => {
+  res.status(200).json({ 
+    message: "API is working!",
+    routes: {
+      messages: "/messages/:otherUserId",
+      messages_test: "/messages/test/ping",
+      contacts: "/contacts",
+      auth: "/auth/login and /auth/register",
+    }
+  });
+});
+
 // Health check endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "UP", environment: NODE_ENV });
