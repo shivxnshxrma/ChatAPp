@@ -12,6 +12,7 @@ const messageSchema = new mongoose.Schema({
   mediaType: { type: String, enum: ["image", "video", "audio", "document"] }, // Type of media
   timestamp: { type: Date, default: Date.now },
   isDelivered: { type: Boolean, default: false },
+  isRead: { type: Boolean, default: false },
 });
 
 module.exports = mongoose.model("Message", messageSchema);

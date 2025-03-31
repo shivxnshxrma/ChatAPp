@@ -97,6 +97,9 @@ mongoose.connection.on('reconnected', () => {
   console.log('MongoDB reconnected');
 });
 
+// Track online users and their last seen time
+const onlineUsers = new Map(); // userId -> { socketId, lastSeen }
+
 // Routes
 app.use("/auth", authRoutes);
 app.use("/messages", messageRoutes);
@@ -148,6 +151,31 @@ io.on("connection", (socket) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     socket.userId = decoded.id; // Attach userId to socket
     socket.join(socket.userId); // Join a room for direct messages & updates
+    
+    // Track user as online with current timestamp
+    onlineUsers.set(socket.userId, { 
+      socketId: socket.id, 
+      lastSeen: new Date().toISOString() 
+    });
+    
+    // Broadcast to all connected users that this user is online
+    socket.broadcast.emit('userStatus', { 
+      userId: socket.userId, 
+      isOnline: true 
+    });
+    
+    // Send current online users status to the newly connected user
+    for (const [userId, userData] of onlineUsers.entries()) {
+      // Don't send user their own status
+      if (userId !== socket.userId) {
+        socket.emit('userStatus', {
+          userId: userId,
+          isOnline: true,
+          lastSeen: userData.lastSeen
+        });
+      }
+    }
+    
     console.log(`✅ User ${socket.userId} joined the chat`);
   } catch (error) {
     console.error("❌ Invalid Token:", error);
@@ -167,17 +195,78 @@ io.on("connection", (socket) => {
         content,
         mediaUrl,
         mediaType,
-        thumbnailUrl
+        thumbnailUrl,
+        isDelivered: true // Set to true since we saved it to the database
       });
 
       await message.save();
       await message.populate("sender", "username");
 
       // Emit message to receiver's socket room
-      io.to(receiverId).emit("receiveMessage", message);
+      io.to(receiverId).emit("newMessage", message);
+      
+      // Respond to sender with confirmation
+      socket.emit("messageSent", { messageId: message._id, isDelivered: true });
     } catch (error) {
       console.error("❌ Error sending message:", error);
       socket.emit("error", { message: "Failed to send message" });
+    }
+  });
+
+  // ✅ Handle marking messages as read
+  socket.on("markMessagesAsRead", async ({ contactId }) => {
+    try {
+      const userId = socket.userId;
+      
+      // Update all unread messages from this contact to this user
+      const result = await Message.updateMany(
+        { 
+          sender: contactId, 
+          receiver: userId,
+          isRead: { $ne: true }
+        },
+        { 
+          isRead: true 
+        }
+      );
+      
+      console.log(`✅ Marked ${result.modifiedCount} messages as read for user ${userId} from ${contactId}`);
+      
+      // Notify the sender that their messages were read
+      io.to(contactId).emit("messagesRead", { by: userId });
+    } catch (error) {
+      console.error("❌ Error marking messages as read:", error);
+    }
+  });
+
+  // ✅ Handle updating unread counts
+  socket.on("getUnreadCounts", async () => {
+    try {
+      const userId = socket.userId;
+      
+      // Find all distinct senders who sent unread messages to this user
+      const unreadMessagesBySender = await Message.aggregate([
+        {
+          $match: {
+            receiver: new mongoose.Types.ObjectId(userId),
+            isRead: { $ne: true }
+          }
+        },
+        {
+          $group: {
+            _id: "$sender",
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+      
+      console.log(`✅ Found ${unreadMessagesBySender.length} contacts with unread messages for user ${userId}`);
+      
+      // Send the unread counts back to the user
+      socket.emit("unreadCounts", { counts: unreadMessagesBySender });
+      
+    } catch (error) {
+      console.error("❌ Error getting unread counts:", error);
     }
   });
 
@@ -242,9 +331,38 @@ io.on("connection", (socket) => {
   });
 
   // ✅ Handle disconnection
-  socket.on("disconnect", () =>
-    console.log("❌ User disconnected:", socket.id)
-  );
+  socket.on("disconnect", () => {
+    console.log("❌ User disconnected:", socket.id);
+    
+    if (socket.userId) {
+      // Update lastSeen time on disconnect
+      const lastSeen = new Date().toISOString();
+      
+      // Store lastSeen time but remove from active online users
+      onlineUsers.set(socket.userId, { 
+        socketId: null, 
+        lastSeen: lastSeen 
+      });
+      
+      // After short delay, check if user reconnected
+      setTimeout(() => {
+        const userData = onlineUsers.get(socket.userId);
+        
+        // If user hasn't reconnected (socketId is still null), 
+        // broadcast offline status and lastSeen time
+        if (userData && !userData.socketId) {
+          socket.broadcast.emit('userStatus', {
+            userId: socket.userId,
+            isOnline: false,
+            lastSeen: lastSeen
+          });
+          
+          // Keep lastSeen info but mark as offline by setting null socketId
+          onlineUsers.set(socket.userId, { socketId: null, lastSeen });
+        }
+      }, 5000); // Give 5 seconds to reconnect before broadcasting offline status
+    }
+  });
 });
 
 // ✅ Start server
