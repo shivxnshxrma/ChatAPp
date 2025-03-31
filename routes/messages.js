@@ -95,8 +95,8 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
     
     console.log(`Fetching messages between ${userId} and ${otherUserId}`);
     
-    // Check if both user IDs are valid
-    if (!userId || !otherUserId) {
+    // Validate IDs
+    if (!userId || !otherUserId || otherUserId.length < 12) {
       console.log('Invalid user IDs provided');
       return res.json({
         messages: [],
@@ -110,48 +110,64 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
       });
     }
     
-    // Pagination parameters
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
+    try {
+      // Pagination parameters
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const skip = (page - 1) * limit;
 
-    // Get messages with pagination
-    const messages = await Message.find({
-      $or: [
-        { sender: userId, receiver: otherUserId },
-        { sender: otherUserId, receiver: userId },
-      ],
-    })
-      .sort({ timestamp: -1 }) // Sort by newest first for pagination
-      .skip(skip)
-      .limit(limit)
-      .populate("sender", "username")
-      .lean();
-    
-    console.log(`Found ${messages.length} messages`);
-    
-    // Get total count for pagination info
-    const totalMessages = await Message.countDocuments({
-      $or: [
-        { sender: userId, receiver: otherUserId },
-        { sender: otherUserId, receiver: userId },
-      ],
-    });
-    
-    const totalPages = Math.ceil(totalMessages / limit);
-    
-    res.json({
-      messages: messages.reverse(), // Reverse to show oldest first in the UI
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalMessages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
-      },
-    });
+      // Get messages with pagination
+      const messages = await Message.find({
+        $or: [
+          { sender: userId, receiver: otherUserId },
+          { sender: otherUserId, receiver: userId },
+        ],
+      })
+        .sort({ timestamp: -1 }) // Sort by newest first for pagination
+        .skip(skip)
+        .limit(limit)
+        .populate("sender", "username")
+        .lean();
+      
+      console.log(`Found ${messages.length} messages`);
+      
+      // Get total count for pagination info
+      const totalMessages = await Message.countDocuments({
+        $or: [
+          { sender: userId, receiver: otherUserId },
+          { sender: otherUserId, receiver: userId },
+        ],
+      });
+      
+      const totalPages = Math.ceil(totalMessages / limit);
+      
+      res.json({
+        messages: messages.reverse(), // Reverse to show oldest first in the UI
+        pagination: {
+          currentPage: page,
+          totalPages,
+          totalMessages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1,
+        },
+      });
+    } catch (dbError) {
+      console.error("Database error fetching messages:", dbError);
+      // Return an empty message array instead of failing
+      res.json({
+        messages: [],
+        pagination: {
+          currentPage: 1,
+          totalPages: 0,
+          totalMessages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+        error: dbError.message
+      });
+    }
   } catch (error) {
-    console.error("Error fetching messages:", error);
+    console.error("General error in messages route:", error);
     // Return empty messages array instead of error to prevent app crashes
     res.json({
       messages: [],

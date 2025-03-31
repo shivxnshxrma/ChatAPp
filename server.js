@@ -68,14 +68,34 @@ app.use("/api", apiLimiter);
 // Static files
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-// ✅ Connect to MongoDB
+// ✅ Connect to MongoDB with improved error handling
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    // Add connection options for stability
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+    serverSelectionTimeoutMS: 5000, // 5 seconds timeout for server selection
+    socketTimeoutMS: 45000, // 45 seconds timeout for socket operations
+  })
   .then(() => console.log("✅ Connected to MongoDB"))
   .catch((err) => {
     console.error("❌ MongoDB Connection Error:", err);
-    process.exit(1); // Exit process with failure
+    // Don't exit the process - let the server run even without DB
+    console.log("⚠️ Server will run in limited mode without database connection");
   });
+
+// Handle MongoDB connection events
+mongoose.connection.on('error', err => {
+  console.error('MongoDB connection error:', err);
+});
+
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB disconnected, attempting to reconnect...');
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('MongoDB reconnected');
+});
 
 // Routes
 app.use("/auth", authRoutes);

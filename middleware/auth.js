@@ -13,7 +13,7 @@ module.exports = (req, res, next) => {
       console.log('Using token from query parameter');
     } 
     // 2. Check Authorization header (standard approach)
-    else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    else if (req.headers && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
       token = req.headers.authorization.split(' ')[1];
       console.log('Using token from Authorization header');
     }
@@ -24,10 +24,23 @@ module.exports = (req, res, next) => {
       return res.status(401).json({ message: "Authentication failed: No token provided" });
     }
     
-    // Verify the token
+    // Safely handle token verification
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const secret = process.env.JWT_SECRET;
+      if (!secret) {
+        console.error("JWT secret not configured");
+        return res.status(500).json({ message: "Server authentication configuration error" });
+      }
+      
+      const decoded = jwt.verify(token, secret);
       console.log(`Token valid for user: ${decoded.id}`);
+      
+      // Ensure user ID is set
+      if (!decoded || !decoded.id) {
+        console.error("Invalid token payload - missing user ID");
+        return res.status(401).json({ message: "Authentication failed: Invalid token payload" });
+      }
+      
       req.user = decoded;
       next();
     } catch (tokenError) {
