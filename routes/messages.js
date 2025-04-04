@@ -198,4 +198,55 @@ router.get("/:otherUserId", authMiddleware, async (req, res) => {
   }
 });
 
+// Add / improve this endpoint (assuming it exists or should be created)
+router.get('/unread', authMiddleware, async (req, res) => {
+  try {
+    console.log('GET /messages/unread - Fetching unread counts for user', req.user._id);
+    const userId = req.user._id;
+    
+    // Find all messages sent to this user that are unread
+    const unreadMessages = await Message.find({
+      receiver: userId,
+      isRead: false
+    }).populate('sender', 'username');
+    
+    console.log(`Found ${unreadMessages.length} total unread messages`);
+    
+    // Group messages by sender
+    const countsByContact = {};
+    unreadMessages.forEach(msg => {
+      const senderId = msg.sender._id.toString();
+      if (!countsByContact[senderId]) {
+        countsByContact[senderId] = {
+          _id: senderId,
+          count: 0,
+          username: msg.sender.username,
+          timestamp: msg.timestamp || msg.createdAt,
+          lastMessage: msg.content
+        };
+      }
+      
+      countsByContact[senderId].count += 1;
+      
+      // Keep the most recent message info
+      const msgDate = new Date(msg.timestamp || msg.createdAt);
+      const currentDate = new Date(countsByContact[senderId].timestamp);
+      
+      if (msgDate > currentDate) {
+        countsByContact[senderId].timestamp = msg.timestamp || msg.createdAt;
+        countsByContact[senderId].lastMessage = msg.content;
+      }
+    });
+    
+    const counts = Object.values(countsByContact);
+    console.log(`Returning unread counts for ${counts.length} contacts:`, 
+      counts.map(c => `${c.username}: ${c.count}`).join(', '));
+    
+    res.json(counts);
+  } catch (error) {
+    console.error('Error fetching unread counts:', error);
+    res.status(500).json({ error: 'Failed to fetch unread message counts' });
+  }
+});
+
 module.exports = router;
