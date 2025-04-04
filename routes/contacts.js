@@ -186,8 +186,9 @@ router.get("/search", authMiddleware, async (req, res) => {
   try {
     // Support both q and username parameters for compatibility
     const searchTerm = req.query.q || req.query.username || "";
+    const caseSensitive = req.query.caseSensitive === 'true';
     
-    console.log(`Searching users with term: ${searchTerm}`);
+    console.log(`Searching users with term: ${searchTerm}, case sensitive: ${caseSensitive}`);
     
     if (searchTerm.length < 2) {
       return res.status(400).json({ error: "Search term must be at least 2 characters" });
@@ -198,13 +199,16 @@ router.get("/search", authMiddleware, async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
     
+    // Create regex for searching by prefix
+    const usernameRegex = new RegExp(`^${searchTerm}`, caseSensitive ? '' : 'i');
+    
     // Find users matching search term who aren't the current user
     const users = await User.find({
       $and: [
         { _id: { $ne: req.user.id } }, // Not the current user
         {
           $or: [
-            { username: { $regex: searchTerm, $options: "i" } },
+            { username: { $regex: usernameRegex } },
             { email: { $regex: searchTerm, $options: "i" } },
             { phoneNumber: { $regex: searchTerm, $options: "i" } },
           ],
@@ -217,37 +221,14 @@ router.get("/search", authMiddleware, async (req, res) => {
     
     console.log(`Found ${users.length} users matching search term: ${searchTerm}`);
     
-    // If only one user is found, return it directly for the mobile app
-    if (users.length === 1) {
-      return res.json(users[0]);
+    // Always return array of users
+    if (users.length >= 1) {
+      return res.json(users);
     }
     
-    // Get total count for pagination
-    const totalUsers = await User.countDocuments({
-      $and: [
-        { _id: { $ne: req.user.id } },
-        {
-          $or: [
-            { username: { $regex: searchTerm, $options: "i" } },
-            { email: { $regex: searchTerm, $options: "i" } },
-            { phoneNumber: { $regex: searchTerm, $options: "i" } },
-          ],
-        },
-      ],
-    });
+    // No users found
+    return res.status(404).json({ message: "No users found matching the search term" });
     
-    const totalPages = Math.ceil(totalUsers / limit);
-    
-    res.json({
-      users,
-      pagination: {
-        currentPage: page,
-        totalPages,
-        totalUsers,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1,
-      },
-    });
   } catch (error) {
     console.error("Error searching users:", error);
     res.status(500).json({ error: "Failed to search users" });
