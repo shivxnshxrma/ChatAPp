@@ -187,8 +187,9 @@ io.on("connection", (socket) => {
     try {
       console.log(`✅ Received message from ${socket.userId} to ${data.receiverId}: "${data.content?.substring(0, 20)}${data.content?.length > 20 ? '...' : ''}"`);
       
-      const { receiverId, content, mediaUrl, mediaType, thumbnailUrl } = data;
+      const { content, mediaUrl, mediaType, thumbnailUrl } = data;
       const senderId = socket.userId;
+      const receiverId = data.receiverId;
 
       if (!senderId || !receiverId) {
         console.error(`❌ Invalid message: missing sender (${senderId}) or receiver (${receiverId})`);
@@ -197,7 +198,7 @@ io.on("connection", (socket) => {
       }
       
       // Validate that sender and receiver are different
-      if (senderId === receiverId) {
+      if (senderId == receiverId) {
         console.error(`❌ Invalid message: sender and receiver are the same (${senderId})`);
         socket.emit("error", { message: "Cannot send message to yourself" });
         return;
@@ -272,6 +273,8 @@ io.on("connection", (socket) => {
     try {
       const userId = socket.userId;
       
+      console.log(`📊 Calculating unread message counts for user ${userId}`);
+      
       // Find all distinct senders who sent unread messages to this user
       const unreadMessagesBySender = await Message.aggregate([
         {
@@ -283,12 +286,40 @@ io.on("connection", (socket) => {
         {
           $group: {
             _id: "$sender",
-            count: { $sum: 1 }
+            count: { $sum: 1 },
+            lastMessageContent: { $last: "$content" },
+            lastMessageTimestamp: { $last: "$timestamp" }
           }
+        },
+        {
+          $sort: { lastMessageTimestamp: -1 }
         }
       ]);
       
+      // Format the results with more detailed information
+      const formattedCounts = await Promise.all(unreadMessagesBySender.map(async (item) => {
+        // Try to get the sender username for better display
+        let senderInfo = { username: "Unknown" };
+        try {
+          senderInfo = await User.findById(item._id, "username").lean();
+        } catch (err) {
+          console.error(`❌ Error getting sender info for ${item._id}:`, err.message);
+        }
+        
+        return {
+          _id: item._id,
+          count: item.count,
+          username: senderInfo?.username || "Unknown",
+          lastMessage: item.lastMessageContent?.substring(0, 30) || "",
+          timestamp: item.lastMessageTimestamp
+        };
+      }));
+      
       console.log(`✅ Found ${unreadMessagesBySender.length} contacts with unread messages for user ${userId}`);
+      if (unreadMessagesBySender.length > 0) {
+        const countDetails = unreadMessagesBySender.map(c => `${c._id}: ${c.count}`).join(', ');
+        console.log(`📊 Unread count details: ${countDetails}`);
+      }
       
       // Send the unread counts back to the user
       socket.emit("unreadCounts", { counts: unreadMessagesBySender });
