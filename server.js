@@ -185,31 +185,51 @@ io.on("connection", (socket) => {
   // ✅ Handle sending messages (text + media)
   socket.on("sendMessage", async (data) => {
     try {
+      console.log(`✅ Received message from ${socket.userId} to ${data.receiverId}: "${data.content?.substring(0, 20)}${data.content?.length > 20 ? '...' : ''}"`);
+      
       const { receiverId, content, mediaUrl, mediaType, thumbnailUrl } = data;
       const senderId = socket.userId;
+
+      if (!senderId || !receiverId) {
+        console.error(`❌ Invalid message: missing sender (${senderId}) or receiver (${receiverId})`);
+        socket.emit("error", { message: "Invalid message: missing sender or receiver" });
+        return;
+      }
 
       // Save message to DB
       const message = new Message({
         sender: senderId,
         receiver: receiverId,
-        content,
+        content: content || '',
         mediaUrl,
         mediaType,
         thumbnailUrl,
-        isDelivered: true // Set to true since we saved it to the database
+        isDelivered: true // Set to true since we're saving it to the database
       });
 
       await message.save();
-      await message.populate("sender", "username");
+      console.log(`✅ Message saved to database with ID: ${message._id}`);
+      
+      try {
+        await message.populate("sender", "username");
+      } catch (populateError) {
+        console.error(`❌ Error populating sender: ${populateError.message}`);
+        // Continue anyway, the message was saved
+      }
 
       // Emit message to receiver's socket room
       io.to(receiverId).emit("newMessage", message);
+      console.log(`✅ Message emitted to receiver ${receiverId}`);
       
       // Respond to sender with confirmation
-      socket.emit("messageSent", { messageId: message._id, isDelivered: true });
+      socket.emit("messageSent", { 
+        messageId: message._id.toString(), 
+        isDelivered: true 
+      });
+      console.log(`✅ Delivery confirmation sent to sender ${senderId}`);
     } catch (error) {
       console.error("❌ Error sending message:", error);
-      socket.emit("error", { message: "Failed to send message" });
+      socket.emit("error", { message: "Failed to send message: " + error.message });
     }
   });
 
