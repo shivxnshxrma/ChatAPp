@@ -61,6 +61,47 @@ router.get("/requests", authMiddleware, async (req, res) => {
   }
 });
 
+// Get outgoing friend requests (requests sent by the current user)
+router.get("/requests/outgoing", authMiddleware, async (req, res) => {
+  try {
+    console.log("Fetching outgoing friend requests for user:", req.user.id);
+    
+    // Find all users who have this user in their friendRequests array
+    const usersWithPendingRequests = await User.find({
+      friendRequests: { $in: [req.user.id] }
+    }).select("_id username email");
+    
+    console.log(`Found ${usersWithPendingRequests.length} outgoing requests`);
+    
+    // Format the results to match our FriendRequest structure
+    const outgoingRequests = usersWithPendingRequests.map(receiver => {
+      return {
+        _id: `outgoing-${receiver._id}`, // Create a unique ID for this outgoing request
+        sender: {
+          _id: req.user.id,
+          username: req.user.username,
+          email: req.user.email
+        },
+        receiver: {
+          _id: receiver._id,
+          username: receiver.username,
+          email: receiver.email
+        },
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    });
+    
+    return res.json({
+      outgoingRequests: outgoingRequests || [],
+    });
+  } catch (error) {
+    console.error("Error fetching outgoing friend requests:", error);
+    return res.status(500).json({ error: "Failed to fetch outgoing friend requests" });
+  }
+});
+
 // Get all contacts with pagination
 router.get("/", authMiddleware, async (req, res) => {
   try {
@@ -279,6 +320,35 @@ router.post("/request/:requestId/accept", authMiddleware, async (req, res) => {
   } catch (error) {
     console.error("Error accepting friend request:", error);
     res.status(500).json({ error: "Failed to accept friend request" });
+  }
+});
+
+// Reject friend request
+router.post("/request/:requestId/reject", authMiddleware, async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const currentUser = await User.findById(req.user.id);
+
+    if (!currentUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if request exists
+    if (!currentUser.friendRequests.includes(requestId)) {
+      return res.status(400).json({ error: "Friend request not found" });
+    }
+
+    // Remove from friend requests
+    currentUser.friendRequests = currentUser.friendRequests.filter(
+      id => id.toString() !== requestId
+    );
+
+    await currentUser.save();
+
+    res.json({ message: "Friend request rejected" });
+  } catch (error) {
+    console.error("Error rejecting friend request:", error);
+    res.status(500).json({ error: "Failed to reject friend request" });
   }
 });
 
