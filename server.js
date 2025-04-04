@@ -195,6 +195,13 @@ io.on("connection", (socket) => {
         socket.emit("error", { message: "Invalid message: missing sender or receiver" });
         return;
       }
+      
+      // Validate that sender and receiver are different
+      if (senderId === receiverId) {
+        console.error(`❌ Invalid message: sender and receiver are the same (${senderId})`);
+        socket.emit("error", { message: "Cannot send message to yourself" });
+        return;
+      }
 
       // Save message to DB
       const message = new Message({
@@ -209,6 +216,7 @@ io.on("connection", (socket) => {
 
       await message.save();
       console.log(`✅ Message saved to database with ID: ${message._id}`);
+      console.log(`✅ Message details: sender=${message.sender}, receiver=${message.receiver}`);
       
       try {
         await message.populate("sender", "username");
