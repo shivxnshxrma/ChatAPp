@@ -1,9 +1,9 @@
 # ChatApp  
 **Real-Time Messaging, Anywhere, Anytime**
 
-![last-commit](https://img.shields.io/github/last-commit/yourusername/chatapp)  
-![repo-top-language](https://img.shields.io/github/languages/top/yourusername/chatapp)  
-![repo-language-count](https://img.shields.io/github/languages/count/yourusername/chatapp)
+![last-commit](https://img.shields.io/github/last-commit/shivxnshxrma/chatapp)  
+![repo-top-language](https://img.shields.io/github/languages/top/shivxnshxrma/chatapp)  
+![repo-language-count](https://img.shields.io/github/languages/count/shivxnshxrma/chatapp)
 
 ---
 
